@@ -1,67 +1,220 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Kalkulator + World Currency Index</title>
 <style>
-* { box-sizing: border-box; font-family: Arial, sans-serif; }
-body {
-  background: #0f172a;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 100vh;
-  color: white;
-}
-.app {
-  width: 400px;
-  background: #020617;
-  padding: 20px;
-  border-radius: 16px;
-}
-.display {
-  height: 60px;
-  background: #020617;
-  color: #22c55e;
-  font-size: 26px;
-  text-align: right;
-  padding: 10px;
-  border-radius: 10px;
-  pointer-events: none;
-}
-.buttons {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-  margin-top: 10px;
-}
-button {
-  height: 48px;
-  border: none;
-  border-radius: 12px;
-  font-size: 15px;
-  cursor: pointer;
-  background: #1e293b;
-  color: #e5e7eb;
-}
-.operator { background: #2563eb; }
-.equal { background: #22c55e; color: #020617; grid-column: span 2; }
-.danger { background: #dc2626; }
-select {
-  width: 100%;
-  padding: 8px;
-  border-radius: 8px;
-  margin-top: 10px;
-}
-.section {
-  margin-top: 15px;
-  border-top: 1px solid #334155;
-  padding-top: 10px;
-}
-.index-list div {
-  display: flex;
-  justify-content: space-between;
+  *{box-sizing:border-box;font-family:Arial, sans-serif}
+  body{background:#0f172a;display:flex;justify-content:center;align-items:flex-start;min-height:100vh;color:#fff;padding:24px}
+  .app{width:360px;background:#020617;padding:18px;border-radius:14px}
+  .display{height:56px;background:#020617;color:#22c55e;font-size:26px;text-align:right;padding:8px;border-radius:10px;pointer-events:none}
+  .buttons{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px}
+  button{height:46px;border:none;border-radius:12px;font-size:15px;cursor:pointer;background:#1e293b;color:#e5e7eb}
+  .operator{background:#2563eb}
+  .equal{background:#22c55e;color:#020617;grid-column:span 2}
+  .danger{background:#dc2626}
+  select{width:100%;padding:8px;border-radius:8px;margin-top:10px}
+  .section{margin-top:15px;border-top:1px solid #334155;padding-top:10px}
+  .index-list div{display:flex;justify-content:space-between;padding:8px;border-radius:8px;margin-top:8px;font-size:14px;align-items:center}
+  /* warna indikator: hijau = naik, merah = turun, abu = tetap */
+  .up{background:#0f5132;color:#bbf7d0}
+  .down{background:#4c0f0f;color:#fee2e2}
+  .same{background:#172033;color:#cbd5e1}
+  .rate{font-weight:700;margin-left:8px}
+  .delta{font-size:12px;opacity:0.9;margin-left:8px}
+  .small{font-size:12px;color:#9ca3af;margin-top:6px}
+  .error-box{background:#dc2626;color:white;padding:8px;border-radius:6px;margin-top:8px;display:none}
+</style>
+</head>
+<body>
+  <div class="app">
+    <div id="display" class="display">0</div>
+
+    <!-- Kalkulator -->
+    <div class="buttons">
+      <button class="danger" onclick="clearAll()">C</button>
+      <button onclick="del()">⌫</button>
+      <button onclick="append('%')">%</button>
+      <button class="operator" onclick="append('/')">÷</button>
+
+      <button onclick="append('7')">7</button>
+      <button onclick="append('8')">8</button>
+      <button onclick="append('9')">9</button>
+      <button class="operator" onclick="append('*')">×</button>
+
+      <button onclick="append('4')">4</button>
+      <button onclick="append('5')">5</button>
+      <button onclick="append('6')">6</button>
+      <button class="operator" onclick="append('-')">−</button>
+
+      <button onclick="append('1')">1</button>
+      <button onclick="append('2')">2</button>
+      <button onclick="append('3')">3</button>
+      <button class="operator" onclick="append('+')">+</button>
+
+      <button onclick="append('0')">0</button>
+      <button onclick="append('.')">.</button>
+      <button class="equal" onclick="calculate()">=</button>
+    </div>
+
+    <!-- Konversi -->
+    <div class="section">
+      <select id="currencySelect"></select>
+      <button onclick="convert()">Convert IDR</button>
+      <div id="convertHint" class="small">Masukkan jumlah IDR lalu pilih mata uang dan tekan Convert</div>
+    </div>
+
+    <!-- World Index -->
+    <div class="section">
+      <b>🌍 World Currency Index (Base IDR)</b>
+      <div id="index" class="index-list"></div>
+      <div id="updateInfo" class="small"></div>
+      <div id="errorBox" class="error-box"></div>
+    </div>
+  </div>
+
+  <script>
+  // Semua JS harus berada di dalam tag script ini — tidak boleh ada potongan JS di luar.
+  const API_KEY = "7bf955733d797e7f6e318c49";
+  const BASE = "IDR";
+  const CURRENCIES = ["USD","EUR","JPY","GBP","AUD","CAD","CHF","CNY","SGD","MYR"];
+
+  let expression = "";
+  let rates = {};
+  let previousRates = JSON.parse(localStorage.getItem("previousRates")) || null;
+  let lastUpdate = localStorage.getItem("lastUpdate") || null;
+
+  const display = document.getElementById("display");
+  const indexBox = document.getElementById("index");
+  const currencySelect = document.getElementById("currencySelect");
+  const updateInfo = document.getElementById("updateInfo");
+  const errorBox = document.getElementById("errorBox");
+
+  function append(v){
+    if(display.innerText === "0" && v !== ".") expression = "";
+    expression += v;
+    display.innerText = expression;
+  }
+  function del(){ expression = expression.slice(0,-1); display.innerText = expression || "0"; }
+  function calculate(){
+    try{
+      const expr = expression.replace(/%/g, '/100');
+      expression = eval(expr).toString();
+      display.innerText = expression;
+    }catch(e){ display.innerText = "Error"; expression = ""; }
+  }
+  function clearAll(){ expression = ""; display.innerText = "0"; }
+
+  function showError(msg){
+    errorBox.style.display = "block";
+    errorBox.innerText = msg;
+    indexBox.innerHTML = `<div class="down">Gagal mengambil data</div>`;
+  }
+
+  async function fetchRates(){
+    errorBox.style.display = "none";
+    try{
+      const res = await fetch(`https://v6.exchangerate-api.com/v6/${API_KEY}/latest/${BASE}`);
+      const data = await res.json().catch(()=>null);
+
+      if(!res.ok){
+        const msg = data && data['error-type'] ? data['error-type'] : `HTTP ${res.status}`;
+        showError(`API HTTP Error: ${msg}`);
+        return;
+      }
+      if(!data || data.result !== "success"){
+        const msg = data && data['error-type'] ? data['error-type'] : 'Unknown API error';
+        showError(`API Error: ${msg}`);
+        return;
+      }
+
+      if(lastUpdate !== data.time_last_update_utc){
+        previousRates = (rates && Object.keys(rates).length) ? rates : previousRates;
+        rates = data.conversion_rates || {};
+        localStorage.setItem("previousRates", JSON.stringify(previousRates));
+        localStorage.setItem("lastUpdate", data.time_last_update_utc);
+        lastUpdate = data.time_last_update_utc;
+        updateIndex();
+      } else {
+        rates = data.conversion_rates || rates;
+      }
+
+      updateSelect();
+      renderUpdateInfo();
+    }catch(err){
+      console.error('Fetch error', err);
+      showError(`Gagal mengambil data: ${err.message || err}`);
+    }
+  }
+
+  function updateIndex(){
+    indexBox.innerHTML = "";
+    CURRENCIES.forEach(cur=>{
+      const now = rates[cur];
+      const prev = previousRates ? previousRates[cur] : null;
+      let cls = "same", icon = "➖", deltaText = "";
+
+      if(prev !== null && prev !== undefined && now !== undefined){
+        const diff = now - prev;
+        const pct = prev ? (diff / prev) * 100 : 0;
+        if(diff > 0){ cls = "up"; icon = "📈"; }
+        else if(diff < 0){ cls = "down"; icon = "📉"; }
+        deltaText = `${diff >= 0 ? '+' : ''}${diff.toFixed(6)} (${pct >= 0 ? '+' : ''}${pct.toFixed(3)}%)`;
+      }
+
+      const row = document.createElement("div");
+      row.className = cls;
+      row.innerHTML = `
+        <div style="display:flex;align-items:center;">
+          <span>${cur}</span>
+          <span class="rate">${now !== undefined ? now.toFixed(6) : '—'}</span>
+        </div>
+        <div>
+          <span class="delta">${deltaText}</span>
+          <span style="margin-left:8px">${icon}</span>
+        </div>
+      `;
+      indexBox.appendChild(row);
+    });
+
+    const info = document.createElement("div");
+    info.className = "same";
+    info.style.marginTop = "8px";
+    info.style.padding = "6px";
+    info.innerText = "Update harian (API Free) — perubahan berdasarkan snapshot terakhir";
+    indexBox.appendChild(info);
+  }
+
+  function updateSelect(){
+    if(currencySelect.children.length) return;
+    CURRENCIES.forEach(c=>{
+      const o = document.createElement("option");
+      o.value = c; o.textContent = c; currencySelect.appendChild(o);
+    });
+  }
+
+  function convert(){
+    const idr = parseFloat(display.innerText);
+    if(isNaN(idr)){ display.innerText = "Masukkan angka"; setTimeout(()=>{ display.innerText = "0"; expression = ""; },1200); return; }
+    const cur = currencySelect.value;
+    if(!rates || !rates[cur]){ display.innerText = "Rates belum siap"; return; }
+    const result = (idr * rates[cur]);
+    display.innerText = result.toFixed(6) + " " + cur;
+    expression = "";
+  }
+
+  function renderUpdateInfo(){
+    updateInfo.innerText = lastUpdate ? `Last API update (UTC): ${lastUpdate}` : `Belum ada update API`;
+  }
+
+  // Mulai
+  fetchRates();
+  const INTERVAL_MS = 60000; // 1 menit (ubah bila perlu); API free biasanya update per jam
+  setInterval(fetchRates, INTERVAL_MS);
+  </script>
+</body>
+</html>  justify-content: space-between;
   padding: 6px;
   border-radius: 6px;
   margin-top: 4px;
