@@ -162,45 +162,50 @@
     }
   }
 
-  // updateIndex menerima currentRates dan previousRates (previousRates bisa null)
-  function updateIndex(currentRates, previousRates){
-    indexBox.innerHTML = '';
-    CURRENCIES.forEach(cur=>{
-      const now = currentRates[cur];
-      const prev = previousRates ? previousRates[cur] : null;
-      let cls = 'same', icon = '➖', deltaText = '';
+// Ganti fungsi updateIndex Anda dengan ini
+function updateIndex(currentRates, previousRates){
+  indexBox.innerHTML = '';
+  CURRENCIES.forEach(cur=>{
+    // paksa ke number
+    const now = currentRates && currentRates[cur] !== undefined ? Number(currentRates[cur]) : undefined;
+    const prev = previousRates && previousRates[cur] !== undefined ? Number(previousRates[cur]) : null;
 
-      if(prev !== null && prev !== undefined && now !== undefined){
-        const diff = now - prev;
-        const pct = prev ? (diff / prev) * 100 : 0;
-        if(diff > 0){ cls = 'up'; icon = '📈'; }
-        else if(diff < 0){ cls = 'down'; icon = '📉'; }
-        deltaText = `${diff >= 0 ? '+' : ''}${diff.toFixed(6)} (${pct >= 0 ? '+' : ''}${pct.toFixed(3)}%)`;
-      }
+    let cls = 'same', icon = '➖', deltaText = '';
+    if(prev !== null && !isNaN(prev) && now !== undefined && !isNaN(now)){
+      const diff = now - prev;
+      const pct = prev ? (diff / prev) * 100 : 0;
+      if(diff > 0){ cls = 'up'; icon = '📈'; }
+      else if(diff < 0){ cls = 'down'; icon = '📉'; }
+      deltaText = `${diff >= 0 ? '+' : ''}${diff.toFixed(6)} (${pct >= 0 ? '+' : ''}${pct.toFixed(3)}%)`;
+    }
 
-      const row = document.createElement('div');
-      row.className = cls;
-      row.innerHTML = `
-        <div style="display:flex;align-items:center;">
-          <span>${cur}</span>
-          <span class="rate">${now !== undefined ? now.toFixed(6) : '—'}</span>
-        </div>
-        <div>
-          <span class="delta">${deltaText}</span>
-          <span style="margin-left:8px">${icon}</span>
-        </div>
-      `;
-      indexBox.appendChild(row);
-    });
+    const row = document.createElement('div');
+    row.className = cls;
+    // Force inline background color sebagai fallback jika CSS tertimpa
+    if(cls === 'up') row.style.backgroundColor = '#0f5132';     // hijau gelap
+    else if(cls === 'down') row.style.backgroundColor = '#4c0f0f'; // merah gelap
+    else row.style.backgroundColor = '#172033';                 // default
 
-    const info = document.createElement('div');
-    info.className = 'same';
-    info.style.marginTop = '8px';
-    info.style.padding = '6px';
-    info.innerText = 'Update harian (API Free) — perubahan berdasarkan snapshot terakhir';
-    indexBox.appendChild(info);
-  }
+    row.innerHTML = `
+      <div style="display:flex;align-items:center;">
+        <span style="width:60px">${cur}</span>
+        <span class="rate">${now !== undefined && !isNaN(now) ? now.toFixed(6) : '—'}</span>
+      </div>
+      <div>
+        <span class="delta">${deltaText}</span>
+        <span style="margin-left:8px">${icon}</span>
+      </div>
+    `;
+    indexBox.appendChild(row);
+  });
 
+  const info = document.createElement('div');
+  info.className = 'same';
+  info.style.marginTop = '8px';
+  info.style.padding = '6px';
+  info.innerText = 'Update harian (API Free) — perubahan berdasarkan snapshot terakhir';
+  indexBox.appendChild(info);
+}
   function updateSelect(){
     if(currencySelect.children.length) return;
     CURRENCIES.forEach(c=>{
