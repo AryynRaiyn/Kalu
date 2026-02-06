@@ -26,6 +26,7 @@
   .small{font-size:12px;color:#9ca3af;margin-top:6px}
   .error-box{background:#dc2626;color:white;padding:8px;border-radius:6px;margin-top:8px;display:none}
   .hint{font-size:12px;color:#9ca3af;margin-top:8px}
+  .spark { width:70px; height:18px; display:inline-block; vertical-align:middle; margin-right:8px; }
 </style>
 </head>
 <body>
@@ -81,12 +82,13 @@
   const API_KEY = "7bf955733d797e7f6e318c49";
   const BASE = "IDR";
   const CURRENCIES = ["USD","EUR","JPY","GBP","AUD","CAD","CHF","CNY","SGD","MYR"];
+  const HISTORY_LENGTH = 12; // jumlah snapshot untuk sparkline
 
   // STATE
   let expression = "";
   let rates = {};
-  // previousSnapshot = { time: "...", rates: { USD: ..., ... } } or null
   let previousSnapshot = JSON.parse(localStorage.getItem('previousSnapshot')) || null;
+  let rateHistory = JSON.parse(localStorage.getItem('rateHistory')) || {}; // { USD: [..], EUR: [...] }
 
   const display = document.getElementById("display");
   const indexBox = document.getElementById("index");
@@ -107,7 +109,35 @@
     indexBox.innerHTML = `<div class="down">Gagal mengambil data</div>`;
   }
 
-  // Fetch + snapshot logic
+  // Sparkline generator (mengembalikan string SVG)
+  function sparklineSVG(arr, trend){
+    // arr: array angka (ascending time), trend: 'up'|'down'|'same'
+    const w = 70, h = 18, pad = 4;
+    if(!arr || arr.length < 2){
+      const color = '#94a3b8'; // abu
+      return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg"><line x1="${pad}" y1="${h/2}" x2="${w-pad}" y2="${h/2}" stroke="${color}" stroke-width="2" stroke-linecap="round"/></svg>`;
+    }
+    // gunakan numbers
+    const nums = arr.map(n => Number(n));
+    const min = Math.min(...nums);
+    const max = Math.max(...nums);
+    const range = max - min || 1;
+    // buat path
+    const step = (w - pad*2) / (nums.length - 1);
+    let d = '';
+    nums.forEach((v,i)=>{
+      const x = pad + i * step;
+      // y: invert (0 top)
+      const y = pad + (1 - (v - min) / range) * (h - pad*2);
+      d += (i===0 ? `M ${x} ${y}` : ` L ${x} ${y}`);
+    });
+    const color = trend === 'up' ? '#bbf7d0' : (trend === 'down' ? '#fecaca' : '#94a3b8');
+    return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">
+      <path d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    </svg>`;
+  }
+
+  // Fetch + snapshot + history logic
   async function fetchRates(){
     errorBox.style.display = "none";
     snapshotHint.innerText = '';
@@ -129,30 +159,42 @@
       const newTime = data.time_last_update_utc;
       const newRates = data.conversion_rates || {};
 
-      // Jika ada previousSnapshot dan waktunya berbeda => gunakan previousSnapshot.rates untuk perbandingan
+      // previousRates available jika previousSnapshot ada & waktunya berbeda
       let previousRates = null;
       if(previousSnapshot && previousSnapshot.time && previousSnapshot.time !== newTime){
         previousRates = previousSnapshot.rates;
       }
 
-      // set current rates (for convert)
-      rates = newRates;
-
-      // update UI: jika previousRates ada -> tampilkan perbandingan; jika tidak ada -> beri tahu
-      if(previousRates){
-        updateIndex(newRates, previousRates);
-        snapshotHint.innerText = '';
-      } else {
-        // tidak ada snapshot sebelumnya untuk dibandingkan
-        updateIndex(newRates, null);
-        snapshotHint.innerText = 'Indikator naik/turun butuh snapshot sebelumnya. Tunggu update API berikutnya atau kunjungi lagi nanti.';
+      // update rateHistory (hanya jika waktu berubah) -> push newRates
+      if(!previousSnapshot || previousSnapshot.time !== newTime){
+        // untuk setiap currency, push value baru
+        CURRENCIES.forEach(c=>{
+          const val = newRates[c];
+          if(val === undefined) return;
+          rateHistory[c] = rateHistory[c] || [];
+          // hindari menambah duplicate terakhir (mis. saat reload tanpa update)
+          const last = rateHistory[c].length ? Number(rateHistory[c][rateHistory[c].length-1]) : null;
+          if(last === null || Number(val) !== last){
+            rateHistory[c].push(Number(val));
+            if(rateHistory[c].length > HISTORY_LENGTH) rateHistory[c].shift();
+          }
+        });
+        localStorage.setItem('rateHistory', JSON.stringify(rateHistory));
       }
 
-      // simpan snapshot baru (waktu + rates) untuk perbandingan pada update berikutnya
+      // set current rates (untuk convert)
+      rates = newRates;
+
+      // update UI
+      updateIndex(newRates, previousRates, rateHistory);
+      if(!previousRates){
+        snapshotHint.innerText = 'Indikator naik/turun butuh snapshot sebelumnya. Tunggu update API berikutnya atau gunakan simulasi (lihat instruksi).';
+      }
+
+      // simpan snapshot baru
       previousSnapshot = { time: newTime, rates: newRates };
       localStorage.setItem('previousSnapshot', JSON.stringify(previousSnapshot));
 
-      // update select & info
       updateSelect();
       renderUpdateInfo(newTime);
 
@@ -162,50 +204,66 @@
     }
   }
 
-// Ganti fungsi updateIndex Anda dengan ini
-function updateIndex(currentRates, previousRates){
-  indexBox.innerHTML = '';
-  CURRENCIES.forEach(cur=>{
-    // paksa ke number
-    const now = currentRates && currentRates[cur] !== undefined ? Number(currentRates[cur]) : undefined;
-    const prev = previousRates && previousRates[cur] !== undefined ? Number(previousRates[cur]) : null;
+  // updateIndex menggunakan currentRates, previousRates (atau null), dan history
+  function updateIndex(currentRates, previousRates, history){
+    indexBox.innerHTML = '';
+    CURRENCIES.forEach(cur=>{
+      const now = currentRates && currentRates[cur] !== undefined ? Number(currentRates[cur]) : undefined;
+      const prev = previousRates && previousRates[cur] !== undefined ? Number(previousRates[cur]) : null;
+      let cls = 'same', icon = '➖', deltaText = '';
 
-    let cls = 'same', icon = '➖', deltaText = '';
-    if(prev !== null && !isNaN(prev) && now !== undefined && !isNaN(now)){
-      const diff = now - prev;
-      const pct = prev ? (diff / prev) * 100 : 0;
-      if(diff > 0){ cls = 'up'; icon = '📈'; }
-      else if(diff < 0){ cls = 'down'; icon = '📉'; }
-      deltaText = `${diff >= 0 ? '+' : ''}${diff.toFixed(6)} (${pct >= 0 ? '+' : ''}${pct.toFixed(3)}%)`;
-    }
+      if(prev !== null && !isNaN(prev) && now !== undefined && !isNaN(now)){
+        const diff = now - prev;
+        const pct = prev ? (diff / prev) * 100 : 0;
+        if(diff > 0){ cls = 'up'; icon = '📈'; }
+        else if(diff < 0){ cls = 'down'; icon = '📉'; }
+        deltaText = `${diff >= 0 ? '+' : ''}${diff.toFixed(6)} (${pct >= 0 ? '+' : ''}${pct.toFixed(3)}%)`;
+      }
 
-    const row = document.createElement('div');
-    row.className = cls;
-    // Force inline background color sebagai fallback jika CSS tertimpa
-    if(cls === 'up') row.style.backgroundColor = '#0f5132';     // hijau gelap
-    else if(cls === 'down') row.style.backgroundColor = '#4c0f0f'; // merah gelap
-    else row.style.backgroundColor = '#172033';                 // default
+      // get history array for sparkline
+      const hist = history && Array.isArray(history[cur]) ? history[cur] : [];
+      // determine trend color: based on last diff (if hist has >=2)
+      let trend = 'same';
+      if(hist.length >= 2){
+        const last = hist[hist.length-1];
+        const prevh = hist[hist.length-2];
+        if(Number(last) > Number(prevh)) trend = 'up';
+        else if(Number(last) < Number(prevh)) trend = 'down';
+      }
 
-    row.innerHTML = `
-      <div style="display:flex;align-items:center;">
-        <span style="width:60px">${cur}</span>
-        <span class="rate">${now !== undefined && !isNaN(now) ? now.toFixed(6) : '—'}</span>
-      </div>
-      <div>
-        <span class="delta">${deltaText}</span>
-        <span style="margin-left:8px">${icon}</span>
-      </div>
-    `;
-    indexBox.appendChild(row);
-  });
+      const svg = sparklineSVG(hist, trend);
 
-  const info = document.createElement('div');
-  info.className = 'same';
-  info.style.marginTop = '8px';
-  info.style.padding = '6px';
-  info.innerText = 'Update harian (API Free) — perubahan berdasarkan snapshot terakhir';
-  indexBox.appendChild(info);
-}
+      const row = document.createElement('div');
+      row.className = cls;
+      // inline background fallback
+      if(cls === 'up') row.style.backgroundColor = '#0f5132';
+      else if(cls === 'down') row.style.backgroundColor = '#4c0f0f';
+      else row.style.backgroundColor = '#172033';
+
+      row.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span class="spark">${svg}</span>
+          <div style="display:flex;flex-direction:column;">
+            <span style="font-weight:600">${cur}</span>
+            <span style="font-size:12px;color:#9ca3af">${now !== undefined && !isNaN(now) ? now.toFixed(6) : '—'}</span>
+          </div>
+        </div>
+        <div style="text-align:right;min-width:90px">
+          <div style="font-size:12px;color:rgba(255,255,255,0.85)">${deltaText || ' '}</div>
+          <div style="margin-top:4px">${icon}</div>
+        </div>
+      `;
+      indexBox.appendChild(row);
+    });
+
+    const info = document.createElement('div');
+    info.className = 'same';
+    info.style.marginTop = '8px';
+    info.style.padding = '6px';
+    info.innerText = 'Update harian (API Free) — perubahan berdasarkan snapshot terakhir';
+    indexBox.appendChild(info);
+  }
+
   function updateSelect(){
     if(currencySelect.children.length) return;
     CURRENCIES.forEach(c=>{
@@ -230,7 +288,7 @@ function updateIndex(currentRates, previousRates){
 
   // START
   fetchRates();
-  const INTERVAL_MS = 60000; // 1 menit (ubah bila perlu); API free biasanya update per jam
+  const INTERVAL_MS = 60000; // 1 menit (ubah bila perlu)
   setInterval(fetchRates, INTERVAL_MS);
   </script>
 </body>
