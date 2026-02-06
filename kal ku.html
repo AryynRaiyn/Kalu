@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kalkulator + World Currency Index</title>
+
+<style>
+* { box-sizing: border-box; font-family: Arial, sans-serif; }
+
+body {
+  background: #0f172a;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  color: white;
+}
+
+.app {
+  width: 400px;
+  background: #020617;
+  padding: 20px;
+  border-radius: 16px;
+}
+
+.display {
+  height: 60px;
+  background: #020617;
+  color: #22c55e;
+  font-size: 26px;
+  text-align: right;
+  padding: 10px;
+  border-radius: 10px;
+  pointer-events: none;
+}
+
+.buttons {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-top: 10px;
+}
+
+button {
+  height: 48px;
+  border: none;
+  border-radius: 12px;
+  font-size: 15px;
+  cursor: pointer;
+  background: #1e293b;
+  color: #e5e7eb;
+}
+
+.operator { background: #2563eb; }
+.equal { background: #22c55e; color: #020617; grid-column: span 2; }
+.danger { background: #dc2626; }
+
+select {
+  width: 100%;
+  padding: 8px;
+  border-radius: 8px;
+  margin-top: 10px;
+}
+
+.section {
+  margin-top: 15px;
+  border-top: 1px solid #334155;
+  padding-top: 10px;
+}
+
+.index-list div {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px;
+  border-radius: 6px;
+  margin-top: 4px;
+  font-size: 14px;
+}
+
+.up { background: #16a34a; }
+.down { background: #dc2626; }
+.same { background: #475569; }
+</style>
+</head>
+
+<body>
+
+<div class="app">
+  <div id="display" class="display">0</div>
+
+  <!-- Kalkulator -->
+  <div class="buttons">
+    <button class="danger" onclick="clearAll()">C</button>
+    <button onclick="del()">⌫</button>
+    <button onclick="append('%')">%</button>
+    <button class="operator" onclick="append('/')">÷</button>
+
+    <button onclick="append('7')">7</button>
+    <button onclick="append('8')">8</button>
+    <button onclick="append('9')">9</button>
+    <button class="operator" onclick="append('*')">×</button>
+
+    <button onclick="append('4')">4</button>
+    <button onclick="append('5')">5</button>
+    <button onclick="append('6')">6</button>
+    <button class="operator" onclick="append('-')">−</button>
+
+    <button onclick="append('1')">1</button>
+    <button onclick="append('2')">2</button>
+    <button onclick="append('3')">3</button>
+    <button class="operator" onclick="append('+')">+</button>
+
+    <button onclick="append('0')">0</button>
+    <button onclick="append('.')">.</button>
+    <button class="equal" onclick="calculate()">=</button>
+  </div>
+
+  <!-- Konversi -->
+  <div class="section">
+    <select id="currencySelect"></select>
+    <button onclick="convert()">Convert IDR</button>
+  </div>
+
+  <!-- World Index -->
+  <div class="section">
+    <b>🌍 World Currency Index (Base IDR)</b>
+    <div id="index" class="index-list"></div>
+  </div>
+</div>
+
+<script>
+/* ================= CONFIG ================= */
+const API_KEY = "7bf955733d797e7f6e318c49";
+const BASE = "IDR";
+const UPDATE_INTERVAL = 60000;
+
+const CURRENCIES = ["USD","EUR","JPY","GBP","AUD","CAD","CHF","CNY","SGD","MYR"];
+
+/* ================= STATE ================= */
+let expression = "";
+let rates = {};
+let previousRates = null; // 🔥 PENTING
+
+/* ================= ELEMENT ================= */
+const display = document.getElementById("display");
+const indexBox = document.getElementById("index");
+const currencySelect = document.getElementById("currencySelect");
+
+/* ================= KALKULATOR ================= */
+function append(v){
+  if(display.innerText === "0") expression = "";
+  expression += v;
+  display.innerText = expression;
+}
+
+function del(){
+  expression = expression.slice(0,-1);
+  display.innerText = expression || "0";
+}
+
+function calculate(){
+  try{
+    expression = eval(expression).toString();
+    display.innerText = expression;
+  }catch{
+    display.innerText = "Error";
+    expression = "";
+  }
+}
+
+function clearAll(){
+  expression = "";
+  display.innerText = "0";
+  indexBox.innerHTML = "";
+}
+
+/* ================= API ================= */
+async function fetchRates(){
+  try{
+    const res = await fetch(
+      `https://v6.exchangerate-api.com/v6/${API_KEY}/latest/${BASE}`
+    );
+    const data = await res.json();
+
+    if(!data.conversion_rates) return;
+
+    // 🔥 SIMPAN DATA LAMA SEBELUM DIOVERWRITE
+    if(rates && Object.keys(rates).length > 0){
+      previousRates = {...rates};
+    }
+
+    rates = data.conversion_rates;
+
+    updateIndex();
+    updateSelect();
+  }catch(err){
+    console.error("Fetch error:", err);
+  }
+}
+
+/* ================= INDEX ================= */
+function updateIndex(){
+  indexBox.innerHTML = "";
+
+  CURRENCIES.forEach(cur=>{
+    const now = rates[cur];
+    const prev = previousRates ? previousRates[cur] : null;
+
+    let cls = "same";
+    let icon = "➖";
+
+    if(prev !== null){
+      if(now > prev){
+        cls = "up";
+        icon = "📈";
+      }else if(now < prev){
+        cls = "down";
+        icon = "📉";
+      }
+    }
+
+    const row = document.createElement("div");
+    row.className = cls;
+    row.innerHTML = `<span>${cur}</span><span>${icon}</span>`;
+    indexBox.appendChild(row);
+  });
+}
+
+/* ================= SELECT ================= */
+function updateSelect(){
+  if(currencySelect.children.length > 0) return;
+
+  CURRENCIES.forEach(cur=>{
+    const opt = document.createElement("option");
+    opt.value = cur;
+    opt.textContent = cur;
+    currencySelect.appendChild(opt);
+  });
+}
+
+/* ================= CONVERT ================= */
+function convert(){
+  const idr = parseFloat(display.innerText);
+  if(isNaN(idr)) return;
+
+  const cur = currencySelect.value;
+  display.innerText = (idr * rates[cur]).toFixed(4) + " " + cur;
+  expression = "";
+}
+
+/* ================= START ================= */
+fetchRates();                 // load pertama
+setInterval(fetchRates, UPDATE_INTERVAL); // auto refresh
+</script>
+
+</body>
+</html>
