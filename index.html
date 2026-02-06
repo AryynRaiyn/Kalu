@@ -129,18 +129,30 @@ select {
   </div>
 </div>
 
+<      }else if(now < prev){
+        cls = "down";
+        icon = "📉";
+      }
+    }
+
+    const row = document.createElement("div");
+    row.className = cls;
+    row.innerHTML = `<span>${cur}</span><span>${icon}</span>`;
+    indexBox.appendChild(row);
+  });
+}
+
 <script>
 /* ================= CONFIG ================= */
 const API_KEY = "7bf955733d797e7f6e318c49";
 const BASE = "IDR";
-const UPDATE_INTERVAL = 60000;
-
 const CURRENCIES = ["USD","EUR","JPY","GBP","AUD","CAD","CHF","CNY","SGD","MYR"];
 
 /* ================= STATE ================= */
 let expression = "";
 let rates = {};
-let previousRates = null; // 🔥 PENTING
+let previousRates = JSON.parse(localStorage.getItem("previousRates")) || null;
+let lastUpdate = localStorage.getItem("lastUpdate");
 
 /* ================= ELEMENT ================= */
 const display = document.getElementById("display");
@@ -153,12 +165,10 @@ function append(v){
   expression += v;
   display.innerText = expression;
 }
-
 function del(){
   expression = expression.slice(0,-1);
   display.innerText = expression || "0";
 }
-
 function calculate(){
   try{
     expression = eval(expression).toString();
@@ -168,7 +178,6 @@ function calculate(){
     expression = "";
   }
 }
-
 function clearAll(){
   expression = "";
   display.innerText = "0";
@@ -183,19 +192,25 @@ async function fetchRates(){
     );
     const data = await res.json();
 
-    if(!data.conversion_rates) return;
-
-    // 🔥 SIMPAN DATA LAMA SEBELUM DIOVERWRITE
-    if(rates && Object.keys(rates).length > 0){
-      previousRates = {...rates};
+    if(data.result !== "success"){
+      indexBox.innerHTML = `<div class="down">API Error</div>`;
+      return;
     }
 
-    rates = data.conversion_rates;
+    // Jika update API baru
+    if(lastUpdate !== data.time_last_update_utc){
+      previousRates = rates;
+      rates = data.conversion_rates;
 
-    updateIndex();
+      localStorage.setItem("previousRates", JSON.stringify(previousRates));
+      localStorage.setItem("lastUpdate", data.time_last_update_utc);
+
+      updateIndex();
+    }
+
     updateSelect();
-  }catch(err){
-    console.error("Fetch error:", err);
+  }catch{
+    indexBox.innerHTML = `<div class="down">Gagal mengambil data</div>`;
   }
 }
 
@@ -211,13 +226,8 @@ function updateIndex(){
     let icon = "➖";
 
     if(prev !== null){
-      if(now > prev){
-        cls = "up";
-        icon = "📈";
-      }else if(now < prev){
-        cls = "down";
-        icon = "📉";
-      }
+      if(now > prev){ cls = "up"; icon = "📈"; }
+      else if(now < prev){ cls = "down"; icon = "📉"; }
     }
 
     const row = document.createElement("div");
@@ -225,17 +235,21 @@ function updateIndex(){
     row.innerHTML = `<span>${cur}</span><span>${icon}</span>`;
     indexBox.appendChild(row);
   });
+
+  const info = document.createElement("div");
+  info.className = "same";
+  info.innerText = "Update harian (API Free)";
+  indexBox.appendChild(info);
 }
 
 /* ================= SELECT ================= */
 function updateSelect(){
-  if(currencySelect.children.length > 0) return;
-
-  CURRENCIES.forEach(cur=>{
-    const opt = document.createElement("option");
-    opt.value = cur;
-    opt.textContent = cur;
-    currencySelect.appendChild(opt);
+  if(currencySelect.children.length) return;
+  CURRENCIES.forEach(c=>{
+    const o = document.createElement("option");
+    o.value = c;
+    o.textContent = c;
+    currencySelect.appendChild(o);
   });
 }
 
@@ -243,15 +257,15 @@ function updateSelect(){
 function convert(){
   const idr = parseFloat(display.innerText);
   if(isNaN(idr)) return;
-
   const cur = currencySelect.value;
   display.innerText = (idr * rates[cur]).toFixed(4) + " " + cur;
   expression = "";
 }
 
 /* ================= START ================= */
-fetchRates();                 // load pertama
-setInterval(fetchRates, UPDATE_INTERVAL); // auto refresh
+fetchRates();
+// cukup 1x per jam, bukan per menit
+setInterval(fetchRates, 3600000);
 </script>
 
 </body>
