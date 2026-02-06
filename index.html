@@ -243,14 +243,43 @@ function updateIndex(){
 }
 
 /* ================= SELECT ================= */
-function updateSelect(){
-  if(currencySelect.children.length) return;
-  CURRENCIES.forEach(c=>{
-    const o = document.createElement("option");
-    o.value = c;
-    o.textContent = c;
-    currencySelect.appendChild(o);
+function updateIndex(){
+  indexBox.innerHTML = "";
+
+  if(!rates || Object.keys(rates).length === 0){
+    indexBox.innerHTML = `<div class="same">Loading data kurs...</div>`;
+    return;
+  }
+
+  CURRENCIES.forEach(cur=>{
+    const now = rates[cur];
+    const prev = previousRates ? previousRates[cur] : null;
+
+    let cls = "same";
+    let changeText = "0.00%";
+
+    if(prev){
+      const diff = ((now - prev) / prev) * 100;
+      changeText = diff.toFixed(2) + "%";
+
+      if(diff > 0) cls = "up";
+      else if(diff < 0) cls = "down";
+    }
+
+    const row = document.createElement("div");
+    row.className = cls;
+    row.innerHTML = `
+      <span>${cur}</span>
+      <span>${now.toFixed(6)}</span>
+      <span>${changeText}</span>
+    `;
+    indexBox.appendChild(row);
   });
+
+  const info = document.createElement("div");
+  info.className = "same";
+  info.innerText = "Data harian (ExchangeRate API Free)";
+  indexBox.appendChild(info);
 }
 
 /* ================= CONVERT ================= */
