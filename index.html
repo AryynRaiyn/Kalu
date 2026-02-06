@@ -25,6 +25,7 @@
   .delta{font-size:12px;opacity:0.9;margin-left:8px}
   .small{font-size:12px;color:#9ca3af;margin-top:6px}
   .error-box{background:#dc2626;color:white;padding:8px;border-radius:6px;margin-top:8px;display:none}
+  .hint{font-size:12px;color:#9ca3af;margin-top:8px}
 </style>
 </head>
 <body>
@@ -71,39 +72,33 @@
       <div id="index" class="index-list"></div>
       <div id="updateInfo" class="small"></div>
       <div id="errorBox" class="error-box"></div>
+      <div id="snapshotHint" class="hint"></div>
     </div>
   </div>
 
   <script>
-  // Semua JS harus berada di dalam tag script ini — tidak boleh ada potongan JS di luar.
+  // CONFIG
   const API_KEY = "7bf955733d797e7f6e318c49";
   const BASE = "IDR";
   const CURRENCIES = ["USD","EUR","JPY","GBP","AUD","CAD","CHF","CNY","SGD","MYR"];
 
+  // STATE
   let expression = "";
   let rates = {};
-  let previousRates = JSON.parse(localStorage.getItem("previousRates")) || null;
-  let lastUpdate = localStorage.getItem("lastUpdate") || null;
+  // previousSnapshot = { time: "...", rates: { USD: ..., ... } } or null
+  let previousSnapshot = JSON.parse(localStorage.getItem('previousSnapshot')) || null;
 
   const display = document.getElementById("display");
   const indexBox = document.getElementById("index");
   const currencySelect = document.getElementById("currencySelect");
   const updateInfo = document.getElementById("updateInfo");
   const errorBox = document.getElementById("errorBox");
+  const snapshotHint = document.getElementById("snapshotHint");
 
-  function append(v){
-    if(display.innerText === "0" && v !== ".") expression = "";
-    expression += v;
-    display.innerText = expression;
-  }
+  // Kalkulator helpers
+  function append(v){ if(display.innerText === "0" && v !== ".") expression = ""; expression += v; display.innerText = expression; }
   function del(){ expression = expression.slice(0,-1); display.innerText = expression || "0"; }
-  function calculate(){
-    try{
-      const expr = expression.replace(/%/g, '/100');
-      expression = eval(expr).toString();
-      display.innerText = expression;
-    }catch(e){ display.innerText = "Error"; expression = ""; }
-  }
+  function calculate(){ try{ const expr = expression.replace(/%/g, '/100'); expression = eval(expr).toString(); display.innerText = expression; }catch(e){ display.innerText = "Error"; expression = ""; } }
   function clearAll(){ expression = ""; display.innerText = "0"; }
 
   function showError(msg){
@@ -112,8 +107,10 @@
     indexBox.innerHTML = `<div class="down">Gagal mengambil data</div>`;
   }
 
+  // Fetch + snapshot logic
   async function fetchRates(){
     errorBox.style.display = "none";
+    snapshotHint.innerText = '';
     try{
       const res = await fetch(`https://v6.exchangerate-api.com/v6/${API_KEY}/latest/${BASE}`);
       const data = await res.json().catch(()=>null);
@@ -129,41 +126,59 @@
         return;
       }
 
-      if(lastUpdate !== data.time_last_update_utc){
-        previousRates = (rates && Object.keys(rates).length) ? rates : previousRates;
-        rates = data.conversion_rates || {};
-        localStorage.setItem("previousRates", JSON.stringify(previousRates));
-        localStorage.setItem("lastUpdate", data.time_last_update_utc);
-        lastUpdate = data.time_last_update_utc;
-        updateIndex();
-      } else {
-        rates = data.conversion_rates || rates;
+      const newTime = data.time_last_update_utc;
+      const newRates = data.conversion_rates || {};
+
+      // Jika ada previousSnapshot dan waktunya berbeda => gunakan previousSnapshot.rates untuk perbandingan
+      let previousRates = null;
+      if(previousSnapshot && previousSnapshot.time && previousSnapshot.time !== newTime){
+        previousRates = previousSnapshot.rates;
       }
 
+      // set current rates (for convert)
+      rates = newRates;
+
+      // update UI: jika previousRates ada -> tampilkan perbandingan; jika tidak ada -> beri tahu
+      if(previousRates){
+        updateIndex(newRates, previousRates);
+        snapshotHint.innerText = '';
+      } else {
+        // tidak ada snapshot sebelumnya untuk dibandingkan
+        updateIndex(newRates, null);
+        snapshotHint.innerText = 'Indikator naik/turun butuh snapshot sebelumnya. Tunggu update API berikutnya atau kunjungi lagi nanti.';
+      }
+
+      // simpan snapshot baru (waktu + rates) untuk perbandingan pada update berikutnya
+      previousSnapshot = { time: newTime, rates: newRates };
+      localStorage.setItem('previousSnapshot', JSON.stringify(previousSnapshot));
+
+      // update select & info
       updateSelect();
-      renderUpdateInfo();
+      renderUpdateInfo(newTime);
+
     }catch(err){
       console.error('Fetch error', err);
       showError(`Gagal mengambil data: ${err.message || err}`);
     }
   }
 
-  function updateIndex(){
-    indexBox.innerHTML = "";
+  // updateIndex menerima currentRates dan previousRates (previousRates bisa null)
+  function updateIndex(currentRates, previousRates){
+    indexBox.innerHTML = '';
     CURRENCIES.forEach(cur=>{
-      const now = rates[cur];
+      const now = currentRates[cur];
       const prev = previousRates ? previousRates[cur] : null;
-      let cls = "same", icon = "➖", deltaText = "";
+      let cls = 'same', icon = '➖', deltaText = '';
 
       if(prev !== null && prev !== undefined && now !== undefined){
         const diff = now - prev;
         const pct = prev ? (diff / prev) * 100 : 0;
-        if(diff > 0){ cls = "up"; icon = "📈"; }
-        else if(diff < 0){ cls = "down"; icon = "📉"; }
+        if(diff > 0){ cls = 'up'; icon = '📈'; }
+        else if(diff < 0){ cls = 'down'; icon = '📉'; }
         deltaText = `${diff >= 0 ? '+' : ''}${diff.toFixed(6)} (${pct >= 0 ? '+' : ''}${pct.toFixed(3)}%)`;
       }
 
-      const row = document.createElement("div");
+      const row = document.createElement('div');
       row.className = cls;
       row.innerHTML = `
         <div style="display:flex;align-items:center;">
@@ -178,37 +193,37 @@
       indexBox.appendChild(row);
     });
 
-    const info = document.createElement("div");
-    info.className = "same";
-    info.style.marginTop = "8px";
-    info.style.padding = "6px";
-    info.innerText = "Update harian (API Free) — perubahan berdasarkan snapshot terakhir";
+    const info = document.createElement('div');
+    info.className = 'same';
+    info.style.marginTop = '8px';
+    info.style.padding = '6px';
+    info.innerText = 'Update harian (API Free) — perubahan berdasarkan snapshot terakhir';
     indexBox.appendChild(info);
   }
 
   function updateSelect(){
     if(currencySelect.children.length) return;
     CURRENCIES.forEach(c=>{
-      const o = document.createElement("option");
+      const o = document.createElement('option');
       o.value = c; o.textContent = c; currencySelect.appendChild(o);
     });
   }
 
   function convert(){
     const idr = parseFloat(display.innerText);
-    if(isNaN(idr)){ display.innerText = "Masukkan angka"; setTimeout(()=>{ display.innerText = "0"; expression = ""; },1200); return; }
+    if(isNaN(idr)){ display.innerText = 'Masukkan angka'; setTimeout(()=>{ display.innerText = '0'; expression = ''; },1200); return; }
     const cur = currencySelect.value;
-    if(!rates || !rates[cur]){ display.innerText = "Rates belum siap"; return; }
+    if(!rates || !rates[cur]){ display.innerText = 'Rates belum siap'; return; }
     const result = (idr * rates[cur]);
-    display.innerText = result.toFixed(6) + " " + cur;
-    expression = "";
+    display.innerText = result.toFixed(6) + ' ' + cur;
+    expression = '';
   }
 
-  function renderUpdateInfo(){
-    updateInfo.innerText = lastUpdate ? `Last API update (UTC): ${lastUpdate}` : `Belum ada update API`;
+  function renderUpdateInfo(timeStr){
+    updateInfo.innerText = timeStr ? `Last API update (UTC): ${timeStr}` : 'Belum ada update API';
   }
 
-  // Mulai
+  // START
   fetchRates();
   const INTERVAL_MS = 60000; // 1 menit (ubah bila perlu); API free biasanya update per jam
   setInterval(fetchRates, INTERVAL_MS);
